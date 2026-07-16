@@ -1,0 +1,459 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "log",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -16,
+        -16
+      ],
+      "id": "be8b0005-c088-4be2-bb9c-56d9f061ee2a",
+      "name": "Webhook",
+      "webhookId": "YOUR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "=You are an expense-parsing assistant. Extract structured data from a sentence describing a shared expense written by \"the current user.\"\n\nRULES:\n1. \"I\", \"me\", and \"myself\" always refer to the current user. In the output, the current user must ALWAYS be written as the exact string \"You\" \u2014 never output \"I\", \"me\", or any other pronoun as a literal value anywhere in the JSON.\n2. The PAYER is whoever performed the paying action in the sentence \u2014 identify this by finding who the sentence says \"paid.\" This can be the current user (You) or another named person. Do not default to \"You\" just because \"I\" or \"me\" appears somewhere in the sentence \u2014 read the full sentence structure first.\n3. PARTICIPANTS are everyone splitting the cost, including the payer themselves if they are also splitting it, and including the current user (You) if mentioned as a participant.\n4. AMOUNT must be a plain number, no currency symbols, no extra text.\n5. If you cannot confidently identify a Payer AND an Amount AND at least one Participant from the sentence, do not guess \u2014 return exactly this JSON and nothing else: {\"error\": \"unable to parse\", \"reason\": \"<short explanation>\"}\n\nOUTPUT FORMAT \u2014 return strict JSON only, no explanation, no markdown fences:\n{\"payer\": \"<name or You>\", \"amount\": <number>, \"participants\": [\"<name or You>\", \"...\"]}\n\nEXAMPLES:\n\"I paid 40 for dinner with Alex and Sam\" \u2192 {\"payer\": \"You\", \"amount\": 40, \"participants\": [\"Alex\", \"Sam\"]}\n\"Sam paid 60 for groceries with me and Alex\" \u2192 {\"payer\": \"Sam\", \"amount\": 60, \"participants\": [\"You\", \"Alex\"]}\n\"Alex paid 30 and I was there with Sam\" \u2192 {\"payer\": \"Alex\", \"amount\": 30, \"participants\": [\"You\", \"Sam\"]}\n\"split lunch\" \u2192 {\"error\": \"unable to parse\", \"reason\": \"no amount specified\"}"
+            },
+            {
+              "content": "={{ $json.body.message }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        192,
+        -16
+      ],
+      "id": "f3967a5a-9b5d-4de1-a738-a163a3019dcc",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\n// Extract the actual text from the nested Responses API structure\nlet rawText;\ntry {\n  rawText = input.output[0].content[0].text;\n} catch (e) {\n  rawText = input.message ?? input.text ?? input.content; // fallback for other response formats\n}\n\nif (!rawText) {\n  return [{\n    json: {\n      error: \"unable to parse\",\n      reason: \"no text found in AI response\",\n      debug: JSON.stringify(input).slice(0, 300)\n    }\n  }];\n}\n\nlet data;\ntry {\n  const cleaned = rawText.replace(/```json|```/g, '').trim();\n  data = JSON.parse(cleaned);\n} catch (e) {\n  return [{\n    json: {\n      error: \"unable to parse\",\n      reason: \"invalid JSON from model\",\n      debug: rawText.slice(0, 300)\n    }\n  }];\n}\n\nif (data.error) {\n  return [{\n    json: {\n      error: data.error,\n      reason: data.reason || \"model reported an error\"\n    }\n  }];\n}\n\nif (\n  !data.payer ||\n  typeof data.amount !== 'number' ||\n  !Array.isArray(data.participants) ||\n  data.participants.length === 0\n) {\n  return [{\n    json: {\n      error: \"unable to parse\",\n      reason: \"missing payer, amount, or participants\",\n      debug: JSON.stringify(data)\n    }\n  }];\n}\n\nconst shareEach = Math.round((data.amount / data.participants.length) * 100) / 100;\n\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    payer: data.payer,\n    amount: data.amount,\n    participants: data.participants.join(\", \"),\n    shareEach: shareEach\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        -16
+      ],
+      "id": "20b5b75f-fb19-4ff3-bf04-218c442a412d",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "ledger",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.date }}",
+            "Payer": "={{ $json.payer }}",
+            "Amount": "={{ $json.amount }}",
+            "Participants": "={{ $json.participants }}",
+            "Share Each": "={{ $json.shareEach }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Payer",
+              "displayName": "Payer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Amount",
+              "displayName": "Amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Participants",
+              "displayName": "Participants",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Share Each",
+              "displayName": "Share Each",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        992,
+        -16
+      ],
+      "id": "bff9b199-acea-4937-a0c4-c07c2cb7ab5a",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": null,
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        -16
+      ],
+      "id": "e9ec8237-e84c-46d4-88b1-b8cc02997f13",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "path": "summary",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        32,
+        -208
+      ],
+      "id": "5e6f5a42-6c22-488a-9ca5-ddf3af8c0891",
+      "name": "Webhook1",
+      "webhookId": "YOUR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "ledger",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        208,
+        -208
+      ],
+      "id": "47bf263b-35c4-45e5-84fb-46f2dde29706",
+      "name": "Get row(s) in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": null,
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.summary }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        592,
+        -208
+      ],
+      "id": "4a7e29c2-6747-4ceb-b4c6-4630e8efce04",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(item => item.json);\nconst balances = {}; // { \"debtor|||creditor\": amount }\n\nfor (const row of rows) {\n  const payer = (row.Payer || \"\").trim();\n  const amount = parseFloat(row.Amount);\n  const participants = (row.Participants || \"\")\n    .split(\",\")\n    .map(p => p.trim())\n    .filter(p => p.length > 0);\n\n  if (!payer || isNaN(amount) || participants.length === 0) continue;\n\n  const shareEach = amount / participants.length;\n\n  for (const person of participants) {\n    if (person === payer) continue;\n    const key = person + \"|||\" + payer;\n    balances[key] = (balances[key] || 0) + shareEach;\n  }\n}\n\nconst summary = Object.entries(balances).map(([key, amt]) => {\n  const [debtor, creditor] = key.split(\"|||\");\n  return { debtor, creditor, owes: Math.round(amt * 100) / 100 };\n});\n\nreturn [{ json: { summary } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -208
+      ],
+      "id": "57497124-e525-44e9-87d6-fa4d86cce430",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b8102243-5591-478f-807c-4e84b7bb5919",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        752,
+        0
+      ],
+      "id": "ce0096f0-d284-4ce3-a971-5da7b38badc0",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "content": "summary workflow",
+        "height": 80,
+        "width": 192
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -224,
+        -192
+      ],
+      "typeVersion": 1,
+      "id": "174a8a6c-077d-42e3-910b-6f021dfbfa0d",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "log workflow",
+        "height": 80,
+        "width": 192
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -240,
+        -16
+      ],
+      "typeVersion": 1,
+      "id": "dabf015e-2aac-4336-9881-7c9b1fa8d267",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"success\": false, \"message\": \"Couldn't understand that expense \u2014 try rephrasing.\"}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        864,
+        128
+      ],
+      "id": "81307d38-dc77-4f15-b130-e7d42581622f",
+      "name": "Respond to Webhook2"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "message": "I paid 40 for dinner with Alex and Sam"
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "YOUR_VERSION_ID",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "nodeGroups": [],
+  "id": "YOUR_WORKFLOW_ID",
+  "tags": []
+}
