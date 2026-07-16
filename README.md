@@ -84,7 +84,7 @@ Split calculation and Google Sheets logging — confirming the ledger updates co
 
 The finished UI: type an expense, log it, and view a live "who owes who" settlement summary styled as a receipt.
 
-> **Note:** GitHub can't reliably render image filenames containing spaces. If `split the bill.png` doesn't display, rename it to `split-the-bill.png` (and update the link above to match).
+
 
 ---
 
